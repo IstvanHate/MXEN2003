@@ -80,8 +80,8 @@ int main(void)
 		current_ms = milliseconds_now();
 
 		// Read analog input value (haven't implemented controller yet)
-		fc = adc_read(0) * 0.242; // Scale ADC value for motor control and -8 for MAX 248
-		rc = adc_read(1) * 0.242; // Additional input for right vector adjustment
+		fc = adc_read(0) >> 2; // Scale ADC value for motor control and -8 for MAX 248
+		rc = adc_read(1) >> 2; // Additional input for right vector adjustment
 
 		motorDrive(&fc, &rc);
 		serialOutput();
