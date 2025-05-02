@@ -21,10 +21,9 @@ volatile bool new_message_received_flag = false; //get set as true when UDR2 rec
 volatile uint8_t dataBytes[5];  // Store final message for use in main
 volatile bool AUTONOMOUS = false; //autonomous mode turned on or off
 
-/* not sending anything to controller LCD atm
+//not sending anything to controller LCD atm
 uint8_t sendDataByte1=0, sendDataByte2=0, sendDataByte3=0, sendDataByte4=0;		// data bytes sent
 uint32_t current_ms=0, last_send_ms=0;						// used for timing the serial sending
-*/
 //*********************************************************************************************
 
 void setupMotors()
@@ -72,7 +71,7 @@ int main(void)
 		fc = adc_read(0) * 0.242; // Scale ADC value for motor control and -8 for MAX 248
 		rc = adc_read(1) * 0.242; // Additional input for right vector adjustment
 
-		motorDrive();
+		motorDrive(&fc, &rc);
 		serialOutput();
 
 		if (new_message_received_flag == true)
@@ -82,7 +81,7 @@ int main(void)
 				rc = dataBytes[1];
 				servo1c = dataBytes[2];
 				servo2c = dataBytes[3];
-				AUTONOMOUS = databyte[4]
+				AUTONOMOUS = dataBytes[4];
 			}
 	}
 
@@ -96,6 +95,9 @@ ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial 
 
 {
 	uint8_t serial_byte_in = UDR2;  // Read received byte from USART data reg for USART2 serial port
+	typedef enum { WAIT_START, PARAM1, PARAM2, PARAM3, PARAM4, PARAM5, WAIT_STOP } SerialState; //enumurate nums to what they mean
+	SerialState serial_fsm_state = WAIT_START;
+	uint8_t recvBytes[5];  // Store received input from controller temporarily
 
 	switch (serial_fsm_state)
 	{
@@ -132,9 +134,6 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
 	//declare local variables taking value from pointer
     int16_t fc = *fc_ptr;
     int16_t rc = *rc_ptr;
-	typedef enum { WAIT_START, PARAM1, PARAM2, PARAM3, PARAM4, PARAM5, WAIT_STOP } SerialState; //enumurate nums to what they mean
-	SerialState serial_fsm_state = WAIT_START;
-	uint8_t recvBytes[5];  // Store received input from controller temporarily
 
 	////left and right motor values from forwards and right vector
     lm = fc + rc - 253;

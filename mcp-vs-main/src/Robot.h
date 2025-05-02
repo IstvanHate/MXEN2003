@@ -5,15 +5,6 @@
 #ifndef ROBOT_H_ //double inclusion guard
 #define ROBOT_H_
 
-void pwm_init(void);
-void motorDrive();
-void serialOutput();
-void setupMotors();
-void setupRangeSensors();
-void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr);
-void serialOutput();
-
-
 //include standard libraries
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -23,6 +14,8 @@ void serialOutput();
 #include <stdio.h>
 #include <stdint.h>
 #include <math.h>
+#include <string.h>
+
 //include header files
 #include "serial.h" //minimal serial lib
 #include "adc.h" //minimal adc lib
@@ -32,5 +25,13 @@ void serialOutput();
 
 //constants
 #define BUILD_DATE __TIME__ " " __DATE__"\n"
+
+void pwm_init(void);
+void motorDrive();
+void serialOutput();
+void setupMotors();
+void setupRangeSensors();
+void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr);
+void serialOutput();
 
 #endif /*ROBOT_H_*/
