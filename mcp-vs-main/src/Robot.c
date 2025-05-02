@@ -7,7 +7,18 @@
 
 //header file
 #include "Robot.h"
-
+#define START_BYTE 0xFF
+#define STOP_BYTE 0xFE
+#define PWM_TOP 20000
+#define SERVO_MAX 180
+#define SERVO_MIN 0
+#define SERVO_MID 90
+#define SERVO_OPEN 0
+#define SERVO_CLOSE 180
+#define SERVO1_PIN 0
+#define SERVO2_PIN 1
+#define SERVO1_PWM OCR1A
+#define SERVO2_PWM OCR1B
 
 //declare file scope variables
 //*****************************************************************************************
@@ -26,15 +37,16 @@ uint8_t sendDataByte1=0, sendDataByte2=0, sendDataByte3=0, sendDataByte4=0;		// 
 uint32_t current_ms=0, last_send_ms=0;						// used for timing the serial sending
 //*********************************************************************************************
 
+
 void setupMotors()
 // set clock mode regs, top value and data direction regs
 {
 	TCCR3A = (1<<COM3A1)|(1<<COM3B1)|(1<<WGM31);
   	TCCR3B = (1<<WGM33)|(1<<CS30);					//clock mode 8, no prescaling
 
-  	ICR3 = 20000; 									// TOP value
+  	ICR3 = PWM_TOP; 									// TOP value
 
-  	DDRE |= (1<<PE3)|(1<PE4); 						// PWM pins
+  	DDRE |= (1<<PE3)|(1<<PE4); 						// PWM pins
 	DDRB |= (1<<DDB1)|(1<<DDB0)|(1<<DDB2)|(1<<DDB3);//Digital pins set output low impedence
 }
 
@@ -74,15 +86,16 @@ int main(void)
 		motorDrive(&fc, &rc);
 		serialOutput();
 
-		if (new_message_received_flag == true)
-		//set values based off recieved data bytes
-			{
-				fc = dataBytes[0];
-				rc = dataBytes[1];
-				servo1c = dataBytes[2];
-				servo2c = dataBytes[3];
-				AUTONOMOUS = dataBytes[4];
-			}
+		if (new_message_received_flag == true) {
+			// Process data
+			fc = dataBytes[0];
+			rc = dataBytes[1];
+			servo1c = dataBytes[2];
+			servo2c = dataBytes[3];
+			AUTONOMOUS = dataBytes[4];
+
+			new_message_received_flag = false; // Clear the flag
+		}
 	}
 
 	return (1);
@@ -96,15 +109,15 @@ ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial 
 {
 	uint8_t serial_byte_in = UDR2;  // Read received byte from USART data reg for USART2 serial port
 	typedef enum { WAIT_START, PARAM1, PARAM2, PARAM3, PARAM4, PARAM5, WAIT_STOP } SerialState; //enumurate nums to what they mean
-	SerialState serial_fsm_state = WAIT_START;
-	uint8_t recvBytes[5];  // Store received input from controller temporarily
+	static SerialState serial_fsm_state = WAIT_START; //static variable to keep track of the state machine
+	static uint8_t recvBytes[5];  // Store received input from controller temporarily
 
 	switch (serial_fsm_state)
 	{
 		case WAIT_START: //WAIT_START = 0, initial value of serial_fsm_state
 
 			//if byte isn't start byte, it won't set serial_fsm_state to the first param
-			if (serial_byte_in == 0xFF)  // Start byte received (255 in dec)
+			if (serial_byte_in == START_BYTE)  // Start byte received (255 in dec)
 				serial_fsm_state = PARAM1; //1, first actual byte of data
 			break;
 
@@ -114,7 +127,7 @@ ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial 
 			break;
 
 		case WAIT_STOP:
-			if (serial_byte_in == 0xFE)  // Stop byte received (254 in dec)
+			if (serial_byte_in == STOP_BYTE)  // Stop byte received (254 in dec)
 			{
 				//This little piece of code means if the last byte recieved wasn't the stop byte, it won't update the values for use in main
 				memcpy((void*)dataBytes, (void*)recvBytes, sizeof(recvBytes));  // Copy received data
@@ -140,8 +153,8 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
     rm = fc - rc;
 
 	//set top compare value regs
-    OCR3A = (int32_t)abs(lm) * 20000 / 126;
-    OCR3B = (int32_t)abs(rm) * 20000 / 126;
+    OCR3A = (int32_t)abs(lm) * PWM_TOP / 126;
+    OCR3B = (int32_t)abs(rm) * PWM_TOP / 126;
 
     // Set motor directions with some cheeky compact inline if statements
     if (lm >= 0) { PORTB |= (1<<PB0); PORTB &= ~(1<<PB1); }
