@@ -1,3 +1,10 @@
+/****************************************************************************
+	Project Students: 	 Jack Searle (21502396), Megan Attwill (idk)
+	Description: Controller side code, Runs on Arduino ATMEGA 2560.abort
+				 Takes thumbstick inputs to control 2 x servos and 2 x motors
+				 Transmitts through XBEE to robot using USART protocol
+****************************************************************************/
+
 //include this .c file's header file
 #include "Controller.h"
 
@@ -26,16 +33,16 @@ int main(void)
 	serial0_init(); 	// terminal communication with PC
 	serial2_init();		// microcontroller communication to/from another Arduino
 	// or loopback communication to same Arduino
-	
+
 	uint8_t sendDataByte1=0, sendDataByte2=0, sendDataByte3=0, sendDataByte4=0;		// data bytes sent
-	
+
 	uint32_t current_ms=0, last_send_ms=0;			// used for timing the serial send
-	
+
 	UCSR2B |= (1 << RXCIE2); // Enable the USART Receive Complete interrupt (USART_RXC)
 
 	milliseconds_init();
 	sei();
-	
+
 	while(1)
 	{
 		current_ms = milliseconds_now();
@@ -49,7 +56,7 @@ int main(void)
       		sendDataByte2 = adc_read(1)/4.1; // 1 VER
       		sendDataByte3 = adc_read(14)/4.1; // 2 HOR
       		sendDataByte4 = adc_read(15)/4.1; // 2 VER
-			
+
 			last_send_ms = current_ms;
 			serial2_write_byte(0xFF); 		//send start byte = 255
 			serial2_write_byte(sendDataByte1); 	//send first data byte: must be scaled to the range 0-253
@@ -58,11 +65,11 @@ int main(void)
 			serial2_write_byte(sendDataByte4); 	//send second parameter: must be scaled to the range 0-253
 			serial2_write_byte(0xFE); 		//send stop byte = 254
 
-      
+
 		}
 
 		//if a new byte has been received
-		if(new_message_received_flag) 
+		if(new_message_received_flag)
 		{
 			// now that a full message has been received, we can process the whole message
 			// the code in this section will implement the result of your message
@@ -83,7 +90,7 @@ ISR(USART2_RX_vect)  // ISR executed whenever a new byte is available in the ser
 	static uint8_t recvByte1=0, recvByte2=0, recvByte3=0, recvByte4=0;		// data bytes received
 	static uint8_t serial_fsm_state=0;									// used in the serial receive ISR
 	uint8_t	serial_byte_in = UDR2; //move serial byte into variable
-	
+
 	switch(serial_fsm_state) //switch by the current state
 	{
 		case 0:
@@ -114,7 +121,7 @@ ISR(USART2_RX_vect)  // ISR executed whenever a new byte is available in the ser
 			dataByte2 = recvByte2;
 			dataByte3 = recvByte3;
 			dataByte4 = recvByte4;
-			
+
 			new_message_received_flag=true;
 		}
 		// if the stop byte is not received, there is an error, so no commands are implemented

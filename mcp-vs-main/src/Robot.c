@@ -1,22 +1,35 @@
-//include this .c file's header file
+/****************************************************************************
+	Project Students: 	 Jack Searle (21502396), Megan Attwill (idk)
+	Description: Robot side code, runs on Arduino ATMEGA2560.abort
+				 Contains both code to recieve controller single with XBEE
+				 Contains autonomous portion of code too.
+****************************************************************************/
+
+//header file
 #include "Robot.h"
 
 
-//file scope variables
+//declare file scope variables
+//*****************************************************************************************
+//motor movement variables
+static int16_t lm = 0, rm = 0, fc = 0, rc = 0; //forwards and left components, l and r motor duty
+static int8_t servo1c = 0, servo2c = 0; //servo 1 (horizontal) and servo 2 (open close) components
+//serial string
 static char serial_string[200] = {};
-volatile uint8_t dataByte1=0, dataByte2=0, dataByte3=0, dataByte4=0;		// data bytes received
-volatile bool new_message_received_flag=false;
-static int16_t lm = 0; //left motor
-static int16_t rm = 0; //right motor
-static int16_t fc = 0; // forward vector
-static int16_t rc = 0; //right vector
+//declerations for USART function
+volatile bool new_message_received_flag = false; //get set as true when UDR2 recieves a byte
+volatile uint8_t dataBytes[5];  // Store final message for use in main
+volatile bool AUTONOMOUS = false; //autonomous mode turned on or off
 
+/* not sending anything to controller LCD atm
 uint8_t sendDataByte1=0, sendDataByte2=0, sendDataByte3=0, sendDataByte4=0;		// data bytes sent
-uint32_t current_ms=0, last_send_ms=0;			// used for timing the serial sen
+uint32_t current_ms=0, last_send_ms=0;						// used for timing the serial sending
+*/
+//*********************************************************************************************
 
-
-void setupMotors() {
-
+void setupMotors()
+// set clock mode regs, top value and data direction regs
+{
 	TCCR3A = (1<<COM3A1)|(1<<COM3B1)|(1<<WGM31);
   	TCCR3B = (1<<WGM33)|(1<<CS30);					//clock mode 8, no prescaling
 
@@ -26,18 +39,18 @@ void setupMotors() {
 	DDRB |= (1<<DDB1)|(1<<DDB0)|(1<<DDB2)|(1<<DDB3);//Digital pins set output low impedence
 }
 
-void setupRangeSensors () {
-
+void setupRangeSensors ()
+{
+ //I dread setting up automous
 }
 
-void setupSerial () {
-
+void setupSerial ()
+{
 	UCSR2B |= (1 << RXCIE2); // Enable the USART Receive Complete interrupt (USART_RXC)
 
 	// initialisation
 	serial0_init(); 	// terminal communication with PC
 	serial1_init();		// microcontroller communication to/from another Arduino
-	// or loopback communication to same Arduino
 }
 
 
@@ -51,166 +64,93 @@ int main(void)
 	_delay_ms(100);
 	sei(); 				//enable interrupts
 
-	while (1)
+	while (1) //main loop
 	{
 		current_ms = milliseconds_now();
 
-		// Read analog input value (assuming A0 for simplicity)
-		dataByte4 = adc_read(0) * 0.242; // Scale ADC value for motor control and -8 for MAX 248
-		dataByte3 = adc_read(1) * 0.242; // Additional input for right vector adjustment
+		// Read analog input value (haven't implemented controller yet)
+		fc = adc_read(0) * 0.242; // Scale ADC value for motor control and -8 for MAX 248
+		rc = adc_read(1) * 0.242; // Additional input for right vector adjustment
 
-		// Drive motors based on analog values
-		//motorDrive();
-		int rc = (int)dataByte3;
-		int fc = (int)dataByte4;
+		motorDrive();
+		serialOutput();
 
-		sprintf(serial_string, "%d\n", rc);
-		serial0_print_string(serial_string);
-
-		lm = fc + rc - 248;
-		rm = fc - rc;
-
-		OCR3A = (int32_t)abs(lm)*20000/124; //lm speed from magnitude of lm
-		if (OCR3A > 20000) {
-			OCR3A = 20000;
-		}
-		OCR3B = (int32_t)abs(rm)*20000/124; //rm speed from magnitude of rm
-		if (OCR3B > 20000) {
-			OCR3B = 20000;
-		}
-
-		if(lm>=0) //if lm is positive
-		{
-			//set direction forwards (Left motor)
-			PORTB |= (1<<PB0);
-			PORTB &= ~(1<<PB1);
-		}
-		else
-		{
-			//set direction reverse (Lmotor)
-			PORTB &= ~(1<<PB0);
-			PORTB |= (1<<PB1);
-		}
-
-		if(rm>=0) //if rm is positive
-		{
-			//set direction forwards (Rmotor)
-			PORTB |= (1<<PB2);
-			PORTB &= ~(1<<PB3);
-		}
-		else
-		{
-			//set direction reverse (Rmotor)
-			PORTB &= ~(1<<PB2);
-			PORTB |= (1<<PB3);
-		}
-
-		// Output serial debug info
-		//serialOutput();
-
-		// Small delay to stabilize readings
-		_delay_ms(100);
+		if (new_message_received_flag == true)
+		//set values based off recieved data bytes
+			{
+				fc = dataBytes[0];
+				rc = dataBytes[1];
+				servo1c = dataBytes[2];
+				servo2c = dataBytes[3];
+				AUTONOMOUS = databyte[4]
+			}
 	}
 
 	return (1);
 }
 
-/*
-ISR(USART2_RX_vect)  // ISR executed whenever a new byte is available in the serial buffer
+ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial buffer
+
+	/*interrupt vector raised when UDR2 has a byte ready to be processed, serial comes from XBEE explorer regulated
+	  Start byte, 5 data bytes (forward & right values, servo 1 & servo 2 pos change [8 bit values], autonomous mode [bool])*/
+
 {
-	static uint8_t recvByte1=0, recvByte2=0, recvByte3=0, recvByte4=0;		// data bytes received
-	static uint8_t serial_fsm_state=0;									// used in the serial receive ISR
-	uint8_t	serial_byte_in = UDR2; //move serial byte into variable
+	uint8_t serial_byte_in = UDR2;  // Read received byte from USART data reg for USART2 serial port
 
-	switch(serial_fsm_state) //switch by the current state
+	switch (serial_fsm_state)
 	{
-		case 0:
-		//do nothing, if check after switch case will find start byte and set serial_fsm_state to 1
-		break;
-		case 1: //waiting for first parameter
-		recvByte1 = serial_byte_in;
-		serial_fsm_state++;
-		break;
-		case 2: //waiting for second parameter
-		recvByte2 = serial_byte_in;
-		serial_fsm_state++;
-		break;
-		case 3: //waiting for second parameter
-		recvByte3 = serial_byte_in;
-		serial_fsm_state++;
-		break;
-		case 4: //waiting for second parameter
-		recvByte4 = serial_byte_in;
-		serial_fsm_state++;
-		break;
-		case 5: //waiting for stop byte
-		if(serial_byte_in == 0xFE) //stop byte
-		{
-			// now that the stop byte has been received, set a flag so that the
-			// main loop can execute the results of the message
-			dataByte1 = recvByte1;
-			dataByte2 = recvByte2;
-			dataByte3 = recvByte3;
-			dataByte4 = recvByte4;
+		case WAIT_START: //WAIT_START = 0, initial value of serial_fsm_state
 
-			new_message_received_flag=true;
-		}
-		// if the stop byte is not received, there is an error, so no commands are implemented
-		serial_fsm_state = 0; //do nothing next time except check for start byte (below)
-		break;
-	}
-	if(serial_byte_in == 0xFF) //if start byte is received, we go back to expecting the first data byte
-	{
-		serial_fsm_state=1; // reset on 255
+			//if byte isn't start byte, it won't set serial_fsm_state to the first param
+			if (serial_byte_in == 0xFF)  // Start byte received (255 in dec)
+				serial_fsm_state = PARAM1; //1, first actual byte of data
+			break;
+
+		case PARAM1: case PARAM2: case PARAM3: case PARAM4: case PARAM5:
+			recvBytes[serial_fsm_state - 1] = serial_byte_in; //store byte coming into UDR2 through serial
+			serial_fsm_state++;  // Move to the next parameter
+			break;
+
+		case WAIT_STOP:
+			if (serial_byte_in == 0xFE)  // Stop byte received (254 in dec)
+			{
+				//This little piece of code means if the last byte recieved wasn't the stop byte, it won't update the values for use in main
+				memcpy((void*)dataBytes, (void*)recvBytes, sizeof(recvBytes));  // Copy received data
+				new_message_received_flag = true;  // Set flag for main loop processing
+			}
+			serial_fsm_state = WAIT_START;  // Reset state for next message
+			break;
 	}
 }
-*/
-/*
-void motorDrive () {
-	rc = dataByte3;
-	fc = dataByte4;
 
-	sprintf(serial_string, "%d\n", rc);
-	serial0_print_string(serial_string);
+void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
 
-	lm = fc + rc - 248;
-	rm = fc - rc;
+	/*Takes pointers to fc and rc to avoid use of globl variables
+	  Used for both manual and autonomous motor control */
 
-	OCR3A = (int32_t)abs(lm)*20000/124; //lm speed from magnitude of lm
-	if (OCR3A > 20000) {
-		OCR3A = 20000;
-	}
-	OCR3B = (int32_t)abs(rm)*20000/124; //rm speed from magnitude of rm
-	if (OCR3B > 20000) {
-		OCR3B = 20000;
-	}
+{
+	//declare local variables taking value from pointer
+    int16_t fc = *fc_ptr;
+    int16_t rc = *rc_ptr;
+	typedef enum { WAIT_START, PARAM1, PARAM2, PARAM3, PARAM4, PARAM5, WAIT_STOP } SerialState; //enumurate nums to what they mean
+	SerialState serial_fsm_state = WAIT_START;
+	uint8_t recvBytes[5];  // Store received input from controller temporarily
 
-	if(lm>=0) //if lm is positive
-	{
-		//set direction forwards (Left motor)
-		PORTB |= (1<<PB0);
-		PORTB &= ~(1<<PB1);
-	}
-	else
-	{
-		//set direction reverse (Lmotor)
-		PORTB &= ~(1<<PB0);
-		PORTB |= (1<<PB1);
-	}
+	////left and right motor values from forwards and right vector
+    lm = fc + rc - 253;
+    rm = fc - rc;
 
-	if(rm>=0) //if rm is positive
-	{
-		//set direction forwards (Rmotor)
-		PORTB |= (1<<PB2);
-		PORTB &= ~(1<<PB3);
-	}
-	else
-	{
-		//set direction reverse (Rmotor)
-		PORTB &= ~(1<<PB2);
-		PORTB |= (1<<PB3);
-	}
-}*/
+	//set top compare value regs
+    OCR3A = (int32_t)abs(lm) * 20000 / 126;
+    OCR3B = (int32_t)abs(rm) * 20000 / 126;
+
+    // Set motor directions with some cheeky compact inline if statements
+    if (lm >= 0) { PORTB |= (1<<PB0); PORTB &= ~(1<<PB1); }
+    else         { PORTB &= ~(1<<PB0); PORTB |= (1<<PB1); }
+
+    if (rm >= 0) { PORTB |= (1<<PB2); PORTB &= ~(1<<PB3); }
+    else         { PORTB &= ~(1<<PB2); PORTB |= (1<<PB3); }
+}
 
 void serialOutput() {
 	sprintf(serial_string, "Left Motor: %d \n", lm);

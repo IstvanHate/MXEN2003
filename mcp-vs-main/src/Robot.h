@@ -9,6 +9,10 @@ void pwm_init(void);
 void motorDrive();
 void serialOutput();
 void setupMotors();
+void setupRangeSensors();
+void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr);
+void serialOutput();
+
 
 //include standard libraries
 #include <avr/io.h>
