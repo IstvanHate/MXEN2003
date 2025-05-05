@@ -149,12 +149,12 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
     int16_t rc = *rc_ptr;
 
 	////left and right motor values from forwards and right vector
-    lm = fc + rc - 253;
+    lm = fc + rc - 256; //Change this back to 253 when data is coming in from serial (max is 253 then)
     rm = fc - rc;
 
 	//set top compare value regs
-    OCR3A = (int32_t)abs(lm) * PWM_TOP / 126;
-    OCR3B = (int32_t)abs(rm) * PWM_TOP / 126;
+    OCR3A = (int32_t)abs(lm) * PWM_TOP / 128; //pwm duty cycle as portion of top value
+    OCR3B = (int32_t)abs(rm) * PWM_TOP / 128; //change to 126 when coming in from serial
 
     // Set motor directions with some cheeky compact inline if statements
     if (lm >= 0) { PORTB |= (1<<PB0); PORTB &= ~(1<<PB1); }
