@@ -28,10 +28,10 @@
 
 void pwm_init(void);
 void motorDrive();
-void serialOutput();
+void serialOutput(int8_t val);
 void setupMotors();
 void setupRangeSensors();
 void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr);
-void serialOutput();
+
 
 #endif /*ROBOT_H_*/

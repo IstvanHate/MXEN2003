@@ -1,6 +1,6 @@
 /****************************************************************************
 	Project Students: 	 Jack Searle (21502396), Megan Attwill (idk)
-	Description: Controller side code, Runs on Arduino ATMEGA 2560.abort
+	Description: Controller side code, Runs on Arduino ATMEGA 2560.
 				 Takes thumbstick inputs to control 2 x servos and 2 x motors
 				 Transmitts through XBEE to robot using USART protocol
 ****************************************************************************/
@@ -8,35 +8,29 @@
 //include this .c file's header file
 #include "Controller.h"
 
-//static function prototypes, functions only called in this file
-
-
 //file scope variables
 static char serial_string[200] = {0};
-volatile uint8_t dataByte1=0, dataByte2=0, dataByte3=0, dataByte4=0;		// data bytes received
+volatile uint8_t dataByte1=0, dataByte2=0, dataByte3=0, dataByte4=0; //data bytes recieved
 volatile bool new_message_received_flag=false;
 
 
 int main(void)
 {
-	// initialisation
-	uint16_t x_reading;
-	uint16_t x_comp;
-
-	uint16_t y_reading;
-	uint16_t y_comp;
+	//local variables
+	uint32_t current_ms=0, last_send_ms=0; // used for timing the serial sending
+	uint8_t sendDataByte1=0, sendDataByte2=0, sendDataByte3=0, sendDataByte4=0; //data bytes to be sent
+	Inputs CI; //Controller Inputs struct
 
   	char lcd_string[33] ={0};
 
+
+
+	//initialise functions
 	lcd_init();
 	adc_init();
 	serial0_init(); 	// terminal communication with PC
 	serial2_init();		// microcontroller communication to/from another Arduino
 	// or loopback communication to same Arduino
-
-	uint8_t sendDataByte1=0, sendDataByte2=0, sendDataByte3=0, sendDataByte4=0;		// data bytes sent
-
-	uint32_t current_ms=0, last_send_ms=0;			// used for timing the serial send
 
 	UCSR2B |= (1 << RXCIE2); // Enable the USART Receive Complete interrupt (USART_RXC)
 
@@ -52,19 +46,13 @@ int main(void)
 		{
 			// this is just incrementing variables to send for testing purposes
 			// you will put the code here that puts the message you want to send into sendDataByte1 and sendDataByte2
-			sendDataByte1 = adc_read(0)/4.1; // 1 HOR
-      		sendDataByte2 = adc_read(1)/4.1; // 1 VER
-      		sendDataByte3 = adc_read(14)/4.1; // 2 HOR
-      		sendDataByte4 = adc_read(15)/4.1; // 2 VER
 
 			last_send_ms = current_ms;
-			serial2_write_byte(0xFF); 		//send start byte = 255
-			serial2_write_byte(sendDataByte1); 	//send first data byte: must be scaled to the range 0-253
-			serial2_write_byte(sendDataByte2); 	//send second parameter: must be scaled to the range 0-253
-			serial2_write_byte(sendDataByte3); 	//send first data byte: must be scaled to the range 0-253
-			serial2_write_byte(sendDataByte4); 	//send second parameter: must be scaled to the range 0-253
-			serial2_write_byte(0xFE); 		//send stop byte = 254
+			CI = readSticks(14, 15); //read the thumbsticks (x,y) and scale to 0-253
 
+			serial2_write_bytes(CI.comp_x, CI.comp_y, CI.comp_servo, CI.autonomous);
+			sprintf(serial_string, "sent: 1:%4d, 2:%4d\n", CI.comp_x, CI.comp_y);
+			serial0_print_string(serial_string);  // print the received bytes to the USB
 
 		}
 
@@ -83,6 +71,43 @@ int main(void)
 	}
 	return(1);
 } //end main
+
+Inputs readSticks(int pin1, int pin2) //function to read the thumbsticks
+{
+	//local variables
+	uint16_t x_reading;	//for raw 10 bit ADC value
+	uint16_t y_reading; //for raw 10 bit ADC value
+	//compensated 8bit values to send
+	uint8_t x_comp;
+	uint8_t y_comp;
+	//struct to return
+	Inputs CI; //Controller Inputs
+
+	//read the thumbstick values
+	x_reading = adc_read(pin1)>>2; // read the x axis of the thumbstick and divide by 4
+	y_reading = adc_read(pin2)>>2; // read the y axis of the thumbstick and divide by 4
+
+	//compoensate for dead zone and special values
+	if(x_reading < 5) x_comp = 0;			//if less than 5 set to 0
+	else if (x_reading > 250) x_comp = 253;	//if greater than 250 set to 253
+	else x_comp = x_reading;				//otherwise unchanged
+
+	if(y_reading < 5) y_comp = 0;
+	else if (y_reading > 250) y_comp = 253;
+	else y_comp = y_reading;
+
+	sprintf(serial_string, "x: %d, y: %d \n", x_comp, y_comp); //print to serial for debugging
+	serial0_print_string(serial_string); // print the received bytes to the USB serial to make sure the right messages are received
+
+	//set the struct values
+	CI.comp_x = x_comp; //set the x value
+	CI.comp_y = y_comp; //set the y value
+	CI.comp_servo = 0; //set the servo value to 0 for now
+	CI.autonomous = false; //set the autonomous mode to false for now
+
+	//return the compensated values
+	return (CI);
+} //end readSticksMotor
 
 
 ISR(USART2_RX_vect)  // ISR executed whenever a new byte is available in the serial buffer

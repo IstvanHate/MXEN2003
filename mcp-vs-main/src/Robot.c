@@ -7,11 +7,11 @@
 
 //header file
 #include "Robot.h"
+#include "Controller.h"
+
 #define START_BYTE 0xFF
 #define STOP_BYTE 0xFE
 #define PWM_TOP 20000
-#define SERVO_MAX 180
-#define SERVO_MIN 0
 #define SERVO_MID 90
 #define SERVO_OPEN 0
 #define SERVO_CLOSE 180
@@ -33,8 +33,8 @@ volatile uint8_t dataBytes[5];  // Store final message for use in main
 volatile bool AUTONOMOUS = false; //autonomous mode turned on or off
 
 //not sending anything to controller LCD atm
-uint8_t sendDataByte1=0, sendDataByte2=0, sendDataByte3=0, sendDataByte4=0;		// data bytes sent
-uint32_t current_ms=0, last_send_ms=0;						// used for timing the serial sending
+uint8_t sendDataByte1=0, sendDataByte2=0; //Photoresistor light level + frequency
+uint32_t current_ms=0, last_send_ms=0;	  // used for timing the serial sending
 //*********************************************************************************************
 
 
@@ -47,7 +47,7 @@ void setupMotors()
   	ICR3 = PWM_TOP; 									// TOP value
 
   	DDRE |= (1<<PE3)|(1<<PE4); 						// PWM pins
-	DDRB |= (1<<DDB1)|(1<<DDB0)|(1<<DDB2)|(1<<DDB3);//Digital pins set output low impedence
+	DDRL |= (1<<DDL1)|(1<<DDL0)|(1<<DDL2)|(1<<DDL3);//Digital pins set output low impedence for motors				//Left motor pins set output low impedence
 }
 
 void setupRangeSensors ()
@@ -57,7 +57,7 @@ void setupRangeSensors ()
 
 void setupSerial ()
 {
-	UCSR2B |= (1 << RXCIE2); // Enable the USART Receive Complete interrupt (USART_RXC)
+	UCSR2B |= (1 << RXCIE2); // Enable the USART Receive Com	ete interrupt (USART_RXC)
 
 	// initialisation
 	serial0_init(); 	// terminal communication with PC
@@ -79,12 +79,8 @@ int main(void)
 	{
 		current_ms = milliseconds_now();
 
-		// Read analog input value (haven't implemented controller yet)
-		fc = adc_read(0) >> 2; // Scale ADC value for motor control and -8 for MAX 248
-		rc = adc_read(1) >> 2; // Additional input for right vector adjustment
-
 		motorDrive(&fc, &rc);
-		serialOutput();
+		//serialOutput();
 
 		if (new_message_received_flag == true) {
 			// Process data
@@ -93,6 +89,9 @@ int main(void)
 			servo1c = dataBytes[2];
 			servo2c = dataBytes[3];
 			AUTONOMOUS = dataBytes[4];
+
+			serialOutput(fc);
+			serialOutput(rc);
 
 			new_message_received_flag = false; // Clear the flag
 		}
@@ -108,9 +107,11 @@ ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial 
 
 {
 	uint8_t serial_byte_in = UDR2;  // Read received byte from USART data reg for USART2 serial port
-	typedef enum { WAIT_START, PARAM1, PARAM2, PARAM3, PARAM4, PARAM5, WAIT_STOP } SerialState; //enumurate nums to what they mean
+	typedef enum { WAIT_START, PARAM1, PARAM2, PARAM3, PARAM4, WAIT_STOP } SerialState; //enumurate nums to what they mean
 	static SerialState serial_fsm_state = WAIT_START; //static variable to keep track of the state machine
 	static uint8_t recvBytes[5];  // Store received input from controller temporarily
+
+	serial0_print_string("Y");
 
 	switch (serial_fsm_state)
 	{
@@ -121,7 +122,7 @@ ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial 
 				serial_fsm_state = PARAM1; //1, first actual byte of data
 			break;
 
-		case PARAM1: case PARAM2: case PARAM3: case PARAM4: case PARAM5:
+		case PARAM1: case PARAM2: case PARAM3: case PARAM4:
 			recvBytes[serial_fsm_state - 1] = serial_byte_in; //store byte coming into UDR2 through serial
 			serial_fsm_state++;  // Move to the next parameter
 			break;
@@ -132,6 +133,7 @@ ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial 
 				//This little piece of code means if the last byte recieved wasn't the stop byte, it won't update the values for use in main
 				memcpy((void*)dataBytes, (void*)recvBytes, sizeof(recvBytes));  // Copy received data
 				new_message_received_flag = true;  // Set flag for main loop processing
+				serial0_print_string("Y");
 			}
 			serial_fsm_state = WAIT_START;  // Reset state for next message
 			break;
@@ -157,16 +159,14 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
     OCR3B = (int32_t)abs(rm) * PWM_TOP / 128; //change to 126 when coming in from serial
 
     // Set motor directions with some cheeky compact inline if statements
-    if (lm >= 0) { PORTB |= (1<<PB0); PORTB &= ~(1<<PB1); }
-    else         { PORTB &= ~(1<<PB0); PORTB |= (1<<PB1); }
+    if (lm >= 0) { PORTL |= (1<<PL0); PORTL &= ~(1<<PL1); }
+    else         { PORTL &= ~(1<<PL0); PORTL |= (1<<PL1); }
 
-    if (rm >= 0) { PORTB |= (1<<PB2); PORTB &= ~(1<<PB3); }
-    else         { PORTB &= ~(1<<PB2); PORTB |= (1<<PB3); }
+    if (rm >= 0) { PORTL |= (1<<PL2); PORTL &= ~(1<<PL3); }
+    else         { PORTL &= ~(1<<PL2); PORTL |= (1<<PL3); }
 }
 
-void serialOutput() {
-	sprintf(serial_string, "Left Motor: %d \n", lm);
-	serial0_print_string(serial_string);
-	sprintf(serial_string, "Right Motor: %d  \n", rm);
+void serialOutput(int8_t val) {
+	sprintf(serial_string, "Left Motor: %d \n", val);
 	serial0_print_string(serial_string);
 };
