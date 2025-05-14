@@ -19,6 +19,7 @@
 #define SERVO2_PIN 1
 #define SERVO1_PWM OCR1A
 #define SERVO2_PWM OCR1B
+#define BATTERY_MIN 7
 
 //declare file scope variables
 //*****************************************************************************************
@@ -44,7 +45,7 @@ void setupMotors()
 	TCCR3A = (1<<COM3A1)|(1<<COM3B1)|(1<<WGM31);
   	TCCR3B = (1<<WGM33)|(1<<CS30);					//clock mode 8, no prescaling
 
-  	ICR3 = PWM_TOP; 									// TOP value
+  	ICR3 = PWM_TOP; 								// TOP value
 
   	DDRE |= (1<<PE3)|(1<<PE4); 						// PWM pins
 	DDRL |= (1<<DDL1)|(1<<DDL0)|(1<<DDL2)|(1<<DDL3);//Digital pins set output low impedence for motors				//Left motor pins set output low impedence
@@ -75,10 +76,11 @@ int main(void)
 	_delay_ms(100);
 	sei(); 				//enable interrupts
 
+
 	while (1) //main loop
 	{
 		current_ms = milliseconds_now();
-
+		batteryManagement();
 		motorDrive(&fc, &rc);
 		//serialOutput();
 
@@ -95,15 +97,16 @@ int main(void)
 
 			new_message_received_flag = false; // Clear the flag
 		}
+
 	}
 
 	return (1);
 }
 
-ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial buffer
+/*ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial buffer
 
-	/*interrupt vector raised when UDR2 has a byte ready to be processed, serial comes from XBEE explorer regulated
-	  Start byte, 5 data bytes (forward & right values, servo 1 & servo 2 pos change [8 bit values], autonomous mode [bool])*/
+	//interrupt vector raised when UDR2 has a byte ready to be processed, serial comes from XBEE explorer regulated
+	//Start byte, 5 data bytes (forward & right values, servo 1 & servo 2 pos change [8 bit values], autonomous mode [bool])
 
 {
 	uint8_t serial_byte_in = UDR2;  // Read received byte from USART data reg for USART2 serial port
@@ -138,7 +141,7 @@ ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial 
 			serial_fsm_state = WAIT_START;  // Reset state for next message
 			break;
 	}
-}
+} */
 
 void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
 
@@ -169,4 +172,22 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
 void serialOutput(int8_t val) {
 	sprintf(serial_string, "Left Motor: %d \n", val);
 	serial0_print_string(serial_string);
-};
+}
+
+void batteryManagement(void) {
+
+	DDRA = 0xFF;
+	uint16_t batteryInput = adc_read(2);
+
+	char serial_battery[50] = {};
+	sprintf(serial_battery, "Battery Level: %u\n", batteryInput);
+	serial0_print_string(serial_battery);
+	_delay_ms(100);
+
+	if (batteryInput < 700){
+		PORTA |= (1<<PA0);
+	} else {
+		PORTA &= ~(1<<PA0);
+	}
+}
+

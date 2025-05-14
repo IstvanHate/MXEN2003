@@ -32,6 +32,7 @@ void serialOutput(int8_t val);
 void setupMotors();
 void setupRangeSensors();
 void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr);
+void batteryManagement(void);
 
 
 #endif /*ROBOT_H_*/
