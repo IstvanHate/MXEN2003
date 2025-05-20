@@ -19,9 +19,9 @@
 #define SERVO_PIN PE3
 
 // beacon freq codes + values
-#define TIMER_TOP_VALUE 156250
-#define TIMER_PERIOD 5
-#define LIGHT_THRESHOLD 80
+#define TIMER_TOP_VALUE 500000
+#define TIMER_PERIOD 4
+#define LIGHT_THRESHOLD 200
 volatile uint16_t flashCountR = 0;
 volatile uint16_t flashCountL = 0;
 volatile uint16_t frequencyAVG = 0;
@@ -29,7 +29,7 @@ volatile uint16_t frequencyR = 0;
 volatile uint16_t frequencyL = 0;
 volatile uint16_t freqDiff = 0;
 char freq_string[50] = {0};
-
+char freq_string2[50] = {0};
 
 //declare file scope variables
 //*****************************************************************************************
@@ -77,10 +77,10 @@ void setupBeacon()
 	// sets up clock for overflow period of 5 seconds with rising edge trigger for photoresistors
 	cli();
 	TCCR4A = 0;
-	TCCR4B = (1<<WGM42) | (1<<WGM43) | (1<<CS42);
+	TCCR4B = (1<<WGM42) | (1<<CS41);
 	TCNT4 = 0;
-	ICR4 = TIMER_TOP_VALUE;
-	TIMSK4 |= (1<<TOIE4);
+	OCR4A = TIMER_TOP_VALUE;
+	TIMSK4 |= (1<<OCIE4A);
 	sei();
 }
 
@@ -125,7 +125,7 @@ int main(void)
 		batteryManagement();
 		motorDrive(&fc, &rc);
 		servoDrive(servoInput);
-		//beaconFreq();
+		beaconFreq();
 
 		//beacon frequency detection not in xbee comms loop
 
@@ -267,28 +267,33 @@ void beaconFreq(void){
 	uint16_t lightLeftPrev = 0;
 	uint16_t lightRightCurrent = adc_read(0);
 	uint16_t lightRightPrev = 0;
-	
+
 	//debugging print to serial
 	/*char serial_photoRes[50] = {};
 	sprintf(serial_photoRes, "Light Level Left: %u, Light Level Right: %u\n", photoResLeft, photoResRight);
 	serial0_print_string(serial_photoRes);*/
 	// LEFT
-	if (lightLeftCurrent > THRESHOLD && lightLeftPrev < THRESHOLD)
+	if (lightLeftCurrent > LIGHT_THRESHOLD && lightLeftPrev < LIGHT_THRESHOLD)
 	{
 		flashCountL += 1;
 		lightLeftPrev = lightLeftCurrent;
+		sprintf(freq_string, "Left Light Level: %u Flash Count: %u\n", lightLeftPrev, flashCountL);
+		serial0_print_string(freq_string);
 	}
 
 	// RIGHT
-	if (lightRightCurrent > THRESHOLD && lightRightPrev < THRESHOLD)
+	if (lightRightCurrent > LIGHT_THRESHOLD && lightRightPrev < LIGHT_THRESHOLD)
 	{
 		flashCountR += 1;
 		lightRightPrev = lightRightCurrent;
+		sprintf(freq_string2, "Right Light Level: %u Flash Count: %u\n", lightRightPrev, flashCountR);
+		serial0_print_string(freq_string2);
 	}
 }
 
-ISR(TIMER4_OVF_vect)
+ISR(TIMER4_COMPA_vect)
 {
+	serial0_print_string("4 seconds has passed.\n");
 	frequencyL = flashCountL / TIMER_PERIOD;
 	frequencyR = flashCountR / TIMER_PERIOD;
 	freqDiff = abs(frequencyL - frequencyR);
@@ -304,8 +309,10 @@ ISR(TIMER4_OVF_vect)
 	{
 		frequencyAVG = frequencyR;
 	}
-	
-	if (frequencyAVG = 0)
+	sprintf(freq_string, "Frequency Detected: %u Hz \n", frequencyAVG);
+	serial0_print_string(freq_string);
+	/*
+	if (frequencyAVG == 0)
 	{
 		serial0_print_string("No Beacon Detected.\n");
 	}
@@ -318,7 +325,7 @@ ISR(TIMER4_OVF_vect)
 		sprintf(freq_string, "Frequency Detected: %u Hz\n", frequencyAVG);
 		serial0_print_string(freq_string);
 	}
-	
+		*/
 	flashCountL = 0;
 	flashCountR = 0;
 }
