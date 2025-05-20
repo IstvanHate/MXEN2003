@@ -22,11 +22,17 @@
 #define TIMER_TOP_VALUE 15625
 #define TIMER_PERIOD 5
 #define LIGHT_THRESHOLD 100
+volatile uint16_t lightLeftCurrent = 0, lightRightCurrent = 0, lightLevelFinal;
 volatile uint16_t flashCountR = 0, flashCountL = 0;
-volatile uint16_t frequencyR = 0, frequencyL = 0, freqFinal = 0;
+volatile uint8_t frequencyR = 0, frequencyL = 0, freqFinal = 0;
 volatile uint8_t timerCount = 0;
 char freq_string[50] = {0};
 char freq_string2[50] = {0};
+
+// autonomous + range sensor
+uint16_t rightSensor = 0, frontSensor = 0, leftSensor = 0;
+uint8_t rightSensorVal = 0, frontSensorVal = 0, leftSensorVal = 0;
+char sensor_string[50] = {0};
 
 //declare file scope variables
 //*****************************************************************************************
@@ -45,8 +51,8 @@ uint8_t sendDataByte1=0, sendDataByte2=0; //Photoresistor light level + frequenc
 void setupMotors()
 // set clock mode regs, top value and data direction regs
 {
-	TCCR3A = (1<<COM3A1)|(1<<COM3B1)|(1<<COM3C1)|(1<<WGM31);
-  	TCCR3B = (1<<WGM33)|(1<<CS31);					//clock mode 8, prescaler of 8 set --> may require changing if messing with the motors
+	TCCR3A = (1<<COM3B1)|(1<<COM3C1)|(1<<WGM31);
+  	TCCR3B = (1<<WGM33)|(1<<CS31);					//Mode 12 PRE 8
 
   	ICR3 = PWM_TOP; 								// TOP value
 
@@ -97,7 +103,9 @@ int main(void)
 
 	//set up variables local to main
 	int8_t servoInput = 0;
-	static int16_t fc = 0, rc = 0; //forwards and left components, l and r motor duty
+	int16_t fc = 0, rc = 0; 								   //forwards and left components, l and r motor duty
+	uint32_t current_ms=0, last_send_ms=0;					   // used for timing the serial send
+	uint8_t sendDataByte1=0, sendDataByte2=0, sendDataByte3=0; // data bytes sent
 
 	cli(); 				//disable global interrupts while initialising
 	adc_init(); 		// Initialize ADC
@@ -113,25 +121,36 @@ int main(void)
 	while (1) //main loop
 	{
 
-		servoInput = 120;
-		fc = 200;
-		rc = 200;
-		//current_ms = milliseconds_now();
+		servoInput = 29;
+		fc = 0;
+		rc = 0;
 		batteryManagement();
 		motorDrive(&fc, &rc);
 		servoDrive(servoInput);
 		beaconFreq();
+		autonomous();
 
-		//beacon frequency detection not in xbee comms loop
+
+		//sending data to controller
+		current_ms = milliseconds_now();
+		if (current_ms - last_send_ms >= 100){
+			//setting bytes
+			sendDataByte1 = freqFinal; 				// Frequency
+      		sendDataByte2 = lightLeftCurrent>>2;	// L brightness
+      		sendDataByte3 = lightRightCurrent>>2;	// R brightness
+
+			//sending bytes
+			last_send_ms = current_ms;
+			serial2_write_byte(0xFF); 			//send start byte = 255
+			serial2_write_byte(sendDataByte1); 	//send first data byte: must be scaled to the range 0-253
+			serial2_write_byte(sendDataByte2); 	//send second parameter: must be scaled to the range 0-253
+			serial2_write_byte(sendDataByte3); 	//send first data byte: must be scaled to the range 0-253
+			serial2_write_byte(0xFE); 			//send stop byte = 254
+			last_send_ms = current_ms;
+		}
 
 
-		// For loop for testing purposes: input for servo & motor
-
-		//for (servo1c = 1520;servo1c > 920; servo1c -= 100) {}
-		//servo1c = 1520;
-		//fc = 100;
-		//rc = 0;
-
+		//recieving data from controller
 		if (new_message_received_flag == true) {
 			// Process data from servo
 			fc = 		 dataBytes[0];
@@ -153,15 +172,15 @@ int main(void)
 void servoDrive(uint8_t servoInput)
 //drive servo based on inputted data (Parallax Standard Servo (#900-00005))
 {
-    static uint8_t servo_angle = 90; // initial angle as closed
-    static int16_t t_pulse;
+    static uint8_t servo_angle = 90; // servo angle (degrees)
+    static int16_t t_pulse;			//pulse time in us
 
     // Deadzone for stick center (adjust 10 as needed)
     if (servoInput > 138 && servo_angle < 90) {
-        servo_angle += 4; // Close (up)
+        servo_angle += 1; // Close (up)
     }
     else if (servoInput < 118 && servo_angle > 30) {
-        servo_angle -= 4; // Open (down)
+        servo_angle -= 1; // Open (down)
     }
 
     t_pulse = 10 * servo_angle + 620;
@@ -221,9 +240,12 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
     lm = fc + rc - 256; //Change this back to 253 when data is coming in from serial (max is 253 then)
     rm = fc - rc;
 
+
+
 	//set top compare value regs
     OCR3C = (int32_t)abs(lm) * PWM_TOP / 128; //pwm duty cycle as portion of top value
     OCR3B = (int32_t)abs(rm) * PWM_TOP / 128; //change to 126 when coming in from serial
+
 
     // Set motor directions with some cheeky compact inline if statements
     if (lm >= 0) { PORTL |= (1<<PL2); PORTL &= ~(1<<PL3); }
@@ -233,19 +255,13 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
     else         { PORTL &= ~(1<<PL4); PORTL |= (1<<PL5); }
 }
 
-void serialOutput(int8_t val) {
-	sprintf(serial_string, "Left Motor: %d \n", val);
-	serial0_print_string(serial_string);
-}
 
-void batteryManagement(void) {
+void batteryManagement(void){
+	//If voltage below 7 volts, turn on LED, otherwise keep off.
+	//Uses a hardware voltage divider
 
 	DDRA = 0xFF;
 	uint16_t batteryInput = adc_read(3);
-	//debugging print to serial
-	/*char serial_battery[50] = {};
-	sprintf(serial_battery, "Battery Level: %u\n", batteryInput);
-	serial0_print_string(serial_battery); */
 
 	if (batteryInput < 700){
 		PORTA |= (1<<PA0);
@@ -258,8 +274,8 @@ void batteryManagement(void) {
 void beaconFreq(void){
 	// adc reading of photoresistor input
 	static uint16_t lightLeftPrev = 0, lightRightPrev = 0;
-	uint16_t lightRightCurrent = adc_read(0);
-	uint16_t lightLeftCurrent = adc_read(1);
+	lightRightCurrent = adc_read(0);
+	lightLeftCurrent = adc_read(1);
 
 	//debugging print to serial
 	/*char serial_photoRes[50] = {};
@@ -297,17 +313,19 @@ ISR(TIMER4_COMPA_vect)
 		if (frequencyL > frequencyR)
 		{
 			freqFinal = frequencyL;
+			lightLevelFinal = lightLeftCurrent;
 		}
 		else
 		{
 			freqFinal = frequencyR;
+			lightLevelFinal = lightRightCurrent;
 		}
 		flashCountL = 0;
 		flashCountR = 0;
 		timerCount = 0;
 	}
-
-	if (freqFinal == 0)
+	// print to serial currently --> needs to be updated to send frequency and light level to controller LCD
+	/*if (freqFinal == 0)
 	{
 		serial0_print_string("No Beacon Detected.\n");
 	}
@@ -317,8 +335,30 @@ ISR(TIMER4_COMPA_vect)
 	}
 	else
 	{
-		sprintf(freq_string, "Frequency Detected: %u Hz\n", freqFinal);
+		sprintf(freq_string, "Frequency Detected: %u Hz\nLight Level: %u\n", freqFinal, lightLevelFinal);
 		serial0_print_string(freq_string);
 	}
+	*/
+}
 
+void autonomous(void)
+{
+	leftSensor = adc_read(13);
+	frontSensor = adc_read(14);
+	rightSensor = adc_read(15);
+
+	leftSensorVal = 2446/(leftSensor + 12);
+	rightSensorVal = 2446/(rightSensor + 12);
+	frontSensorVal = 4500/(frontSensor - 50);
+
+
+
+	sprintf(sensor_string, "Front Sensor Reading: %u\n", frontSensorVal);
+	serial0_print_string(sensor_string);
+	_delay_ms(2000);
+}
+
+void serialOutput(int32_t val) {
+	sprintf(serial_string, "value: %ld \n", val);
+	serial0_print_string(serial_string);
 }
