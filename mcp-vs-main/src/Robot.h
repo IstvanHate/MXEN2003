@@ -33,6 +33,8 @@ void setupMotors();
 void setupRangeSensors();
 void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr);
 void batteryManagement(void);
+void beaconFreq(void);
+void servoDrive(uint8_t servoInput);
 
 
 #endif /*ROBOT_H_*/

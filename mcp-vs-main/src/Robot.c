@@ -21,13 +21,16 @@
 // beacon freq codes + values
 #define TIMER_TOP_VALUE 156250
 #define TIMER_PERIOD 5
+volatile uint16_t flashCountR = 0;
+volatile uint16_t flashCountL = 0;
+volatile uint16_t frequencyAVG = 0;
+volatile uint16_t frequencyR = 0;
+volatile uint16_t frequencyL = 0;
+char freq_string[50] = {0};
 
 
 //declare file scope variables
 //*****************************************************************************************
-//motor movement variables
-static int16_t lm = 0, rm = 0, fc = 0, rc = 0; //forwards and left components, l and r motor duty
-static int8_t servo1c = 0, servo2c = 0; //servo 1 (horizontal) and servo 2 (open close) components
 //serial string
 static char serial_string[200] = {};
 //declerations for USART function
@@ -44,7 +47,7 @@ uint32_t current_ms=0, last_send_ms=0;	  // used for timing the serial sending
 void setupMotors()
 // set clock mode regs, top value and data direction regs
 {
-	TCCR3A = (1<<COM3A1)|(1<<COM3B1)|(1<<WGM31);
+	TCCR3A = (1<<COM3A1)|(1<<COM3B1)|(1<<COM3C1)|(1<<WGM31);
   	TCCR3B = (1<<WGM33)|(1<<CS31);					//clock mode 8, prescaler of 8 set --> may require changing if messing with the motors
 
   	ICR3 = PWM_TOP; 								// TOP value
@@ -56,12 +59,14 @@ void setupMotors()
 void setupServo()
 //set pins for servo clock and PWM pin
 {
-	DDRE |= (1<<PE3);						//set servo PWM pin to output
+	DDRB |= (1<<PB5);						//set servo PWM pin to output
 
-	TCCR1A = 0; TCCR1A = 0;					//Set both registers all to 0
-	TCCR1A |= (1 << COM1A1);				//Clear PWM signal on upcount, set on downcount
-	TCCR1B |= (1<<WGM13)|(1<<WGM10);		//Timer mode 9, PWM, phase and frequency correct.
-	TCCR1B = (1<<CS11);						//Set PRESCALER to 8
+	TCCR1A = 0;
+	TCCR1B = 0;
+	TCCR1A |= (1 << COM1A1) | (1 << WGM11); // WGM11 for mode 14/15/9, check datasheet
+	TCCR1B |= (1 << WGM13) | (1 << CS11);   // WGM13 for mode 9, prescaler 8
+	ICR1 = PWM_TOP;
+	OCR1A = SERVO_CLOSE;					//start servo closed
 }
 
 void setupBeacon()
@@ -70,11 +75,11 @@ void setupBeacon()
 	// sets up clock for overflow period of 5 seconds with rising edge trigger for photoresistors
 	cli();
 	TCCR4A = 0;
-	TCCR4B = (1<<WGM42) | (1<<WGM43) | (1<<CS42)
+	TCCR4B = (1<<WGM42) | (1<<WGM43) | (1<<CS42);
 	TCNT4 = 0;
 	ICR4 = TIMER_TOP_VALUE;
 	TIMSK4 |= (1<<TOIE4);
-	EICRA = (1<<ISC11) | (1<<ISC10); // rising edge trigger mode for EICRA
+	EICRA = /*(1<<ISC11) |*/ (1<<ISC10); // rising edge trigger mode for EICRA
 	sei();
 }
 
@@ -94,6 +99,11 @@ void setupSerial ()
 
 int main(void)
 {
+
+	//set up variables local to main
+	int8_t servoInput = 0;
+	static int16_t fc = 0, rc = 0; //forwards and left components, l and r motor duty
+
 	cli(); 				//disable global interrupts while initialising
 	adc_init(); 		// Initialize ADC
 	milliseconds_init();
@@ -107,11 +117,14 @@ int main(void)
 	while (1) //main loop
 	{
 
+		servoInput = 0;
+		fc = 200;
+		rc = 200;
 		current_ms = milliseconds_now();
 		batteryManagement();
 		motorDrive(&fc, &rc);
-		servoControl(&servo1c);
-		beaconFreq();
+		servoDrive(servoInput);
+		//beaconFreq();
 
 		//beacon frequency detection not in xbee comms loop
 
@@ -119,15 +132,15 @@ int main(void)
 		// For loop for testing purposes: input for servo & motor
 
 		//for (servo1c = 1520;servo1c > 920; servo1c -= 100) {}
-		servo1c = 1520;
+		//servo1c = 1520;
 		//fc = 100;
 		//rc = 0;
 
 		if (new_message_received_flag == true) {
 			// Process data from servo
-			fc = dataBytes[0];
-			rc = dataBytes[1];
-			servo1c = dataBytes[2];
+			fc = 		 dataBytes[0];
+			rc = 		 dataBytes[1];
+			servoInput = dataBytes[2];
 			AUTONOMOUS = dataBytes[3];
 
 			serialOutput(fc);
@@ -142,24 +155,21 @@ int main(void)
 }
 
 void servoDrive(uint8_t servoInput)
-//drive servo based on inputted data
+//drive servo based on inputted data (Parallax Standard Servo (#900-00005))
 {
-	static uint8_t servo_angle = 90;	//initial angle as closed
-	static int16_t t_pulse;
+    static uint8_t servo_angle = 90; // initial angle as closed
+    static int16_t t_pulse;
 
-	if ((servoInput > 140)&(servo_angle < 90))
-	{//if thumbstick is pushed forwards and isn't already closed
-		servo_angle += 1;	//increment servo angle
-	}
-	else if ((servoInput < 100)&(servo_angle > 30))
-	{//if thumbstick is pushed back and isn't already open
-		servo_angle -= 1;	//decrement servo angle
-	}
+    // Deadzone for stick center (adjust 10 as needed)
+    if (servoInput > 138 && servo_angle < 90) {
+        servo_angle += 4; // Close (up)
+    }
+    else if (servoInput < 118 && servo_angle > 30) {
+        servo_angle -= 4; // Open (down)
+    }
 
-	t_pulse = 10*servo_angle + 620; //relationship between angle and t pulse from datasheet
-
-
-
+    t_pulse = 10 * servo_angle + 620;
+    OCR1A = t_pulse;
 }
 
 ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial buffer
@@ -206,8 +216,10 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
 
 {
 	//declare local variables taking value from pointer
+	static int16_t lm = 0, rm = 0;
     int16_t fc = *fc_ptr;
     int16_t rc = *rc_ptr;
+
 
 	////left and right motor values from forwards and right vector
     lm = fc + rc - 256; //Change this back to 253 when data is coming in from serial (max is 253 then)
@@ -247,25 +259,19 @@ void batteryManagement(void) {
 	}
 }
 
-void servoControl(int16_t *servo1c_ptr){
-	int16_t servo1c = *servo1c_ptr;
-
-	OCR3A = (int32_t)servo1c;
-}
 
 void beaconFreq(void){
 	// adc reading of photoresistor input
-	// values to
 	uint16_t photoResLeft = adc_read(1);
 	uint16_t photoResRight = adc_read(0);
-
+	/*
 	volatile uint16_t flashCountR;
 	volatile uint16_t flashCountL;
 	uint16_t frequencyAVG;
 	uint16_t frequencyR;
 	uint16_t frequencyL;
 	char freq_string[50] = {0};
-
+	*/
 	//debugging print to serial
 	/*char serial_photoRes[50] = {};
 	sprintf(serial_photoRes, "Light Level Left: %u, Light Level Right: %u\n", photoResLeft, photoResRight);
@@ -279,11 +285,17 @@ void beaconFreq(void){
 	else
 	{
 		serial0_print_string("No Beacon Detected.\n");
+		sprintf(freq_string, "No. Flashes Detected: %u \n", flashCountR);
+		serial0_print_string(freq_string);
 	}
+
+	_delay_ms(500);
+}
 
 ISR(INT0_vect)
 {
 	flashCountL += 1;
+	serial0_print_string("Flash Detected.\n");
 }
 
 ISR(INT1_vect)
@@ -293,13 +305,14 @@ ISR(INT1_vect)
 
 ISR(TIMER4_OVF_vect)
 {
-	if (flashCountL > 0 && flash_countR > 0)
-	{
-		frequencyL = flashCountL / TIME_PERIOD;
-		frequencyR = flashCountR / TIME_PERIOD;
-		frequencyAVG = (frequencyL + frequencyR) / 2;
-	}
-	flashCountL = 0;
-	flashCountR = 0;
+	if (flashCountL > 0 && flashCountR > 0)
+		{
+			frequencyL = flashCountL / TIMER_PERIOD;
+			frequencyR = flashCountR / TIMER_PERIOD;
+			frequencyAVG = (frequencyL + frequencyR) / 2;
+		}
+		flashCountL = 0;
+		flashCountR = 0;
 }
+
 
