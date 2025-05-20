@@ -19,8 +19,8 @@
 #define SERVO_PIN PE3
 
 // beacon freq codes + values
-#define TIMER_TOP_VALUE 500000
-#define TIMER_PERIOD 4
+#define TIMER_TOP_VALUE 15625
+#define TIMER_PERIOD 5
 #define LIGHT_THRESHOLD 200
 volatile uint16_t flashCountR = 0;
 volatile uint16_t flashCountL = 0;
@@ -28,6 +28,7 @@ volatile uint16_t frequencyAVG = 0;
 volatile uint16_t frequencyR = 0;
 volatile uint16_t frequencyL = 0;
 volatile uint16_t freqDiff = 0;
+volatile uint8_t timerCount = 0;
 char freq_string[50] = {0};
 char freq_string2[50] = {0};
 
@@ -75,13 +76,11 @@ void setupBeacon()
 {
 	// both photoresistors wired into external interrupts
 	// sets up clock for overflow period of 5 seconds with rising edge trigger for photoresistors
-	cli();
 	TCCR4A = 0;
-	TCCR4B = (1<<WGM42) | (1<<CS41);
-	TCNT4 = 0;
+	TCCR4B = (1<<WGM42) | (1<<CS42) | (1<<CS40);
 	OCR4A = TIMER_TOP_VALUE;
 	TIMSK4 |= (1<<OCIE4A);
-	sei();
+	TCNT4 = 0;
 }
 
 void setupRangeSensors ()
@@ -111,6 +110,7 @@ int main(void)
 	setupMotors();
 	setupServo();
 	setupSerial();
+	setupBeacon();
 	_delay_ms(100);
 	sei(); 				//enable interrupts
 
@@ -124,7 +124,7 @@ int main(void)
 		current_ms = milliseconds_now();
 		batteryManagement();
 		motorDrive(&fc, &rc);
-		servoDrive(servoInput);
+		//servoDrive(servoInput);
 		beaconFreq();
 
 		//beacon frequency detection not in xbee comms loop
@@ -277,8 +277,8 @@ void beaconFreq(void){
 	{
 		flashCountL += 1;
 		lightLeftPrev = lightLeftCurrent;
-		sprintf(freq_string, "Left Light Level: %u Flash Count: %u\n", lightLeftPrev, flashCountL);
-		serial0_print_string(freq_string);
+		//sprintf(freq_string, "Left Light Level: %u Flash Count: %u\n", lightLeftPrev, flashCountL);
+		//serial0_print_string(freq_string);
 	}
 
 	// RIGHT
@@ -286,31 +286,41 @@ void beaconFreq(void){
 	{
 		flashCountR += 1;
 		lightRightPrev = lightRightCurrent;
-		sprintf(freq_string2, "Right Light Level: %u Flash Count: %u\n", lightRightPrev, flashCountR);
-		serial0_print_string(freq_string2);
+		//sprintf(freq_string2, "Right Light Level: %u Flash Count: %u\n", lightRightPrev, flashCountR);
+		//serial0_print_string(freq_string2);
 	}
 }
 
 ISR(TIMER4_COMPA_vect)
 {
-	serial0_print_string("4 seconds has passed.\n");
-	frequencyL = flashCountL / TIMER_PERIOD;
-	frequencyR = flashCountR / TIMER_PERIOD;
-	freqDiff = abs(frequencyL - frequencyR);
-	if (freqDiff < 2)
+	serial0_print_string("1 second has passed.\n");
+	timerCount += 1;
+	if (timerCount == 5)
 	{
-		frequencyAVG = (frequencyL + frequencyR) / 2;
+		frequencyL = flashCountL / TIMER_PERIOD;
+		frequencyR = flashCountR / TIMER_PERIOD;
+		freqDiff = abs(frequencyL - frequencyR);
+		sprintf(freq_string2, "Total Flash Count L: %u Hz\n Total Flash Count R: %u Hz\n Freq Diff: %u\n", flashCountL, flashCountR, freqDiff);
+		serial0_print_string(freq_string2);
+		if (freqDiff < 2)
+		{
+			frequencyAVG = (frequencyL + frequencyR) / 2;
+		}
+		else if (frequencyL > frequencyR)
+		{
+			frequencyAVG = frequencyL;
+		}
+		else
+		{
+			frequencyAVG = frequencyR;
+		}
+		sprintf(freq_string, "Frequency Detected: %u Hz \n", frequencyAVG);
+		serial0_print_string(freq_string);
+		flashCountL = 0;
+		flashCountR = 0;
+		timerCount = 0;
 	}
-	else if (frequencyL > frequencyR)
-	{
-		frequencyAVG = frequencyL;
-	}
-	else
-	{
-		frequencyAVG = frequencyR;
-	}
-	sprintf(freq_string, "Frequency Detected: %u Hz \n", frequencyAVG);
-	serial0_print_string(freq_string);
+
 	/*
 	if (frequencyAVG == 0)
 	{
@@ -326,8 +336,7 @@ ISR(TIMER4_COMPA_vect)
 		serial0_print_string(freq_string);
 	}
 		*/
-	flashCountL = 0;
-	flashCountR = 0;
+
 }
 
 
