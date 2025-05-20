@@ -19,8 +19,8 @@
 #define SERVO_PIN PE3
 
 // beacon freq codes + values
-#define NO_BEACON_SIGNAL_CODE 65535
-#define MAX_BEACON_PERIOD_REACHED_CODE 65534
+#define TIMER_TOP_VALUE 156250
+#define TIMER_PERIOD 5
 
 
 //declare file scope variables
@@ -66,13 +66,15 @@ void setupServo()
 
 void setupBeacon()
 {
+	// both photoresistors wired into external interrupts
+	// sets up clock for overflow period of 5 seconds with rising edge trigger for photoresistors
 	cli();
 	TCCR4A = 0;
-	TCCR4B = (1<<WGM42) | (1<<WGM43) | (1<<CS40)
+	TCCR4B = (1<<WGM42) | (1<<WGM43) | (1<<CS42)
 	TCNT4 = 0;
-	ICR4 = 65535;
+	ICR4 = TIMER_TOP_VALUE;
 	TIMSK4 |= (1<<TOIE4);
-	EICRA = (1<<ISC11) | (1<<ISC10);
+	EICRA = (1<<ISC11) | (1<<ISC10); // rising edge trigger mode for EICRA
 	sei();
 }
 
@@ -257,53 +259,47 @@ void beaconFreq(void){
 	uint16_t photoResLeft = adc_read(1);
 	uint16_t photoResRight = adc_read(0);
 
-	volatile uint16_t signalMicros;
-	volatile bool newReading; 	// necessary??
-
+	volatile uint16_t flashCountR;
+	volatile uint16_t flashCountL;
+	uint16_t frequencyAVG;
+	uint16_t frequencyR;
+	uint16_t frequencyL;
 	char freq_string[50] = {0};
-	uint16_t frequency = 0;
 
 	//debugging print to serial
 	/*char serial_photoRes[50] = {};
 	sprintf(serial_photoRes, "Light Level Left: %u, Light Level Right: %u\n", photoResLeft, photoResRight);
 	serial0_print_string(serial_photoRes);*/
 
-	if(newReading)
+	if(frequencyAVG > 0)
 	{
-		if (signalMicros == NO_BEACON_SIGNAL_CODE)
-		{
-			serial0_print_string("No Beacon Detected\n");
-		}
-		else if (signalMicros == MAX_BEACON_PERIOD_REACHED_CODE)
-		{
-			serial0_print_string("Beacon Frequency Too Low\n");
-		}
-		else
-		{
-			frequency = 1 / signalMicros;
-			sprintf(freq_string, "%u Hz\n", frequency);
-			serial0_print_string(freq_string);
-		}
+		sprintf(freq_string, "Beacon Frequency: %u Hz\n", frequencyAVG);
+		serial0_print_string(freq_string);
 	}
-	newReading = false;
-
-
-}
-// PLACE IN beaconFreq function???
-ISR(TIMER4_OVF_vect)
-{
-	if(!newReading)
+	else
 	{
-		signalMicros += 4000; // increment signal period value by 4ms
-		if(signalMicros > 20000): // if signal period is larger than 20ms (freq smaller than 50Hz)
-		{
-			newReading = true;
-			signalMicros = ; 	// maximum signal reached code
-		}
+		serial0_print_string("No Beacon Detected.\n");
 	}
-}
 
 ISR(INT0_vect)
 {
-
+	flashCountL += 1;
 }
+
+ISR(INT1_vect)
+{
+	flashCountR +=1;
+}
+
+ISR(TIMER4_OVF_vect)
+{
+	if (flashCountL > 0 && flash_countR > 0)
+	{
+		frequencyL = flashCountL / TIME_PERIOD;
+		frequencyR = flashCountR / TIME_PERIOD;
+		frequencyAVG = (frequencyL + frequencyR) / 2;
+	}
+	flashCountL = 0;
+	flashCountR = 0;
+}
+
