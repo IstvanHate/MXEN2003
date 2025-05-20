@@ -21,11 +21,13 @@
 // beacon freq codes + values
 #define TIMER_TOP_VALUE 156250
 #define TIMER_PERIOD 5
+#define LIGHT_THRESHOLD 80
 volatile uint16_t flashCountR = 0;
 volatile uint16_t flashCountL = 0;
 volatile uint16_t frequencyAVG = 0;
 volatile uint16_t frequencyR = 0;
 volatile uint16_t frequencyL = 0;
+volatile uint16_t freqDiff = 0;
 char freq_string[50] = {0};
 
 
@@ -79,7 +81,6 @@ void setupBeacon()
 	TCNT4 = 0;
 	ICR4 = TIMER_TOP_VALUE;
 	TIMSK4 |= (1<<TOIE4);
-	EICRA = /*(1<<ISC11) |*/ (1<<ISC10); // rising edge trigger mode for EICRA
 	sei();
 }
 
@@ -262,57 +263,64 @@ void batteryManagement(void) {
 
 void beaconFreq(void){
 	// adc reading of photoresistor input
-	uint16_t photoResLeft = adc_read(1);
-	uint16_t photoResRight = adc_read(0);
-	/*
-	volatile uint16_t flashCountR;
-	volatile uint16_t flashCountL;
-	uint16_t frequencyAVG;
-	uint16_t frequencyR;
-	uint16_t frequencyL;
-	char freq_string[50] = {0};
-	*/
+	uint16_t lightLeftCurrent = adc_read(1);
+	uint16_t lightLeftPrev = 0;
+	uint16_t lightRightCurrent = adc_read(0);
+	uint16_t lightRightPrev = 0;
+	
 	//debugging print to serial
 	/*char serial_photoRes[50] = {};
 	sprintf(serial_photoRes, "Light Level Left: %u, Light Level Right: %u\n", photoResLeft, photoResRight);
 	serial0_print_string(serial_photoRes);*/
-
-	if(frequencyAVG > 0)
+	// LEFT
+	if (lightLeftCurrent > THRESHOLD && lightLeftPrev < THRESHOLD)
 	{
-		sprintf(freq_string, "Beacon Frequency: %u Hz\n", frequencyAVG);
-		serial0_print_string(freq_string);
-	}
-	else
-	{
-		serial0_print_string("No Beacon Detected.\n");
-		sprintf(freq_string, "No. Flashes Detected: %u \n", flashCountR);
-		serial0_print_string(freq_string);
+		flashCountL += 1;
+		lightLeftPrev = lightLeftCurrent;
 	}
 
-	_delay_ms(500);
-}
-
-ISR(INT0_vect)
-{
-	flashCountL += 1;
-	serial0_print_string("Flash Detected.\n");
-}
-
-ISR(INT1_vect)
-{
-	flashCountR +=1;
+	// RIGHT
+	if (lightRightCurrent > THRESHOLD && lightRightPrev < THRESHOLD)
+	{
+		flashCountR += 1;
+		lightRightPrev = lightRightCurrent;
+	}
 }
 
 ISR(TIMER4_OVF_vect)
 {
-	if (flashCountL > 0 && flashCountR > 0)
-		{
-			frequencyL = flashCountL / TIMER_PERIOD;
-			frequencyR = flashCountR / TIMER_PERIOD;
-			frequencyAVG = (frequencyL + frequencyR) / 2;
-		}
-		flashCountL = 0;
-		flashCountR = 0;
+	frequencyL = flashCountL / TIMER_PERIOD;
+	frequencyR = flashCountR / TIMER_PERIOD;
+	freqDiff = abs(frequencyL - frequencyR);
+	if (freqDiff < 2)
+	{
+		frequencyAVG = (frequencyL + frequencyR) / 2;
+	}
+	else if (frequencyL > frequencyR)
+	{
+		frequencyAVG = frequencyL;
+	}
+	else
+	{
+		frequencyAVG = frequencyR;
+	}
+	
+	if (frequencyAVG = 0)
+	{
+		serial0_print_string("No Beacon Detected.\n");
+	}
+	else if (frequencyAVG > 20)
+	{
+		serial0_print_string("Frequency Too High.\n");
+	}
+	else
+	{
+		sprintf(freq_string, "Frequency Detected: %u Hz\n", frequencyAVG);
+		serial0_print_string(freq_string);
+	}
+	
+	flashCountL = 0;
+	flashCountR = 0;
 }
 
 
