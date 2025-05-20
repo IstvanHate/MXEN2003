@@ -9,17 +9,19 @@
 #include "Robot.h"
 #include "Controller.h"
 
+// serial comms definitions
 #define START_BYTE 0xFF
 #define STOP_BYTE 0xFE
-#define PWM_TOP 20000
-#define SERVO_MID 90
-#define SERVO_OPEN 0
-#define SERVO_CLOSE 180
-#define SERVO1_PIN 0
-#define SERVO2_PIN 1
-#define SERVO1_PWM OCR1A
-#define SERVO2_PWM OCR1B
-#define BATTERY_MIN 7
+// PWM definitions
+#define PWM_TOP 20000		//180 degrees
+#define SERVO_OPEN 920		//30 degrees
+#define SERVO_CLOSE 1520	//90 degrees
+#define SERVO_PIN PE3
+
+// beacon freq codes + values
+#define NO_BEACON_SIGNAL_CODE 65535
+#define MAX_BEACON_PERIOD_REACHED_CODE 65534
+
 
 //declare file scope variables
 //*****************************************************************************************
@@ -43,12 +45,35 @@ void setupMotors()
 // set clock mode regs, top value and data direction regs
 {
 	TCCR3A = (1<<COM3A1)|(1<<COM3B1)|(1<<WGM31);
-  	TCCR3B = (1<<WGM33)|(1<<CS30);					//clock mode 8, no prescaling
+  	TCCR3B = (1<<WGM33)|(1<<CS31);					//clock mode 8, prescaler of 8 set --> may require changing if messing with the motors
 
   	ICR3 = PWM_TOP; 								// TOP value
 
-  	DDRE |= (1<<PE3)|(1<<PE4); 						// PWM pins
-	DDRL |= (1<<DDL1)|(1<<DDL0)|(1<<DDL2)|(1<<DDL3);//Digital pins set output low impedence for motors				//Left motor pins set output low impedence
+  	DDRE |= (1<<PE4)|(1<<PE5); 						// PWM pins for DC motors to output
+	DDRL |= (1<<DDL4)|(1<<DDL5)|(1<<DDL2)|(1<<DDL3);//Digital pins set output low impedence for motors				//Left motor pins set output low impedence
+}
+
+void setupServo()
+//set pins for servo clock and PWM pin
+{
+	DDRE |= (1<<PE3);						//set servo PWM pin to output
+
+	TCCR1A = 0; TCCR1A = 0;					//Set both registers all to 0
+	TCCR1A |= (1 << COM1A1);				//Clear PWM signal on upcount, set on downcount
+	TCCR1B |= (1<<WGM13)|(1<<WGM10);		//Timer mode 9, PWM, phase and frequency correct.
+	TCCR1B = (1<<CS11);						//Set PRESCALER to 8
+}
+
+void setupBeacon()
+{
+	cli();
+	TCCR4A = 0;
+	TCCR4B = (1<<WGM42) | (1<<WGM43) | (1<<CS40)
+	TCNT4 = 0;
+	ICR4 = 65535;
+	TIMSK4 |= (1<<TOIE4);
+	EICRA = (1<<ISC11) | (1<<ISC10);
+	sei();
 }
 
 void setupRangeSensors ()
@@ -62,9 +87,8 @@ void setupSerial ()
 
 	// initialisation
 	serial0_init(); 	// terminal communication with PC
-	serial1_init();		// microcontroller communication to/from another Arduino
+	serial2_init();		// microcontroller communication to/from another Arduino
 }
-
 
 int main(void)
 {
@@ -72,6 +96,7 @@ int main(void)
 	adc_init(); 		// Initialize ADC
 	milliseconds_init();
 	setupMotors();
+	setupServo();
 	setupSerial();
 	_delay_ms(100);
 	sei(); 				//enable interrupts
@@ -79,18 +104,29 @@ int main(void)
 
 	while (1) //main loop
 	{
+
 		current_ms = milliseconds_now();
 		batteryManagement();
 		motorDrive(&fc, &rc);
-		//serialOutput();
+		servoControl(&servo1c);
+		beaconFreq();
+
+		//beacon frequency detection not in xbee comms loop
+
+
+		// For loop for testing purposes: input for servo & motor
+
+		//for (servo1c = 1520;servo1c > 920; servo1c -= 100) {}
+		servo1c = 1520;
+		//fc = 100;
+		//rc = 0;
 
 		if (new_message_received_flag == true) {
-			// Process data
+			// Process data from servo
 			fc = dataBytes[0];
 			rc = dataBytes[1];
 			servo1c = dataBytes[2];
-			servo2c = dataBytes[3];
-			AUTONOMOUS = dataBytes[4];
+			AUTONOMOUS = dataBytes[3];
 
 			serialOutput(fc);
 			serialOutput(rc);
@@ -103,7 +139,28 @@ int main(void)
 	return (1);
 }
 
-/*ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial buffer
+void servoDrive(uint8_t servoInput)
+//drive servo based on inputted data
+{
+	static uint8_t servo_angle = 90;	//initial angle as closed
+	static int16_t t_pulse;
+
+	if ((servoInput > 140)&(servo_angle < 90))
+	{//if thumbstick is pushed forwards and isn't already closed
+		servo_angle += 1;	//increment servo angle
+	}
+	else if ((servoInput < 100)&(servo_angle > 30))
+	{//if thumbstick is pushed back and isn't already open
+		servo_angle -= 1;	//decrement servo angle
+	}
+
+	t_pulse = 10*servo_angle + 620; //relationship between angle and t pulse from datasheet
+
+
+
+}
+
+ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial buffer
 
 	//interrupt vector raised when UDR2 has a byte ready to be processed, serial comes from XBEE explorer regulated
 	//Start byte, 5 data bytes (forward & right values, servo 1 & servo 2 pos change [8 bit values], autonomous mode [bool])
@@ -113,8 +170,6 @@ int main(void)
 	typedef enum { WAIT_START, PARAM1, PARAM2, PARAM3, PARAM4, WAIT_STOP } SerialState; //enumurate nums to what they mean
 	static SerialState serial_fsm_state = WAIT_START; //static variable to keep track of the state machine
 	static uint8_t recvBytes[5];  // Store received input from controller temporarily
-
-	serial0_print_string("Y");
 
 	switch (serial_fsm_state)
 	{
@@ -136,12 +191,11 @@ int main(void)
 				//This little piece of code means if the last byte recieved wasn't the stop byte, it won't update the values for use in main
 				memcpy((void*)dataBytes, (void*)recvBytes, sizeof(recvBytes));  // Copy received data
 				new_message_received_flag = true;  // Set flag for main loop processing
-				serial0_print_string("Y");
 			}
 			serial_fsm_state = WAIT_START;  // Reset state for next message
 			break;
 	}
-} */
+}
 
 void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
 
@@ -158,15 +212,15 @@ void motorDrive(int16_t *fc_ptr, int16_t *rc_ptr)
     rm = fc - rc;
 
 	//set top compare value regs
-    OCR3A = (int32_t)abs(lm) * PWM_TOP / 128; //pwm duty cycle as portion of top value
+    OCR3C = (int32_t)abs(lm) * PWM_TOP / 128; //pwm duty cycle as portion of top value
     OCR3B = (int32_t)abs(rm) * PWM_TOP / 128; //change to 126 when coming in from serial
 
     // Set motor directions with some cheeky compact inline if statements
-    if (lm >= 0) { PORTL |= (1<<PL0); PORTL &= ~(1<<PL1); }
-    else         { PORTL &= ~(1<<PL0); PORTL |= (1<<PL1); }
-
-    if (rm >= 0) { PORTL |= (1<<PL2); PORTL &= ~(1<<PL3); }
+    if (lm >= 0) { PORTL |= (1<<PL2); PORTL &= ~(1<<PL3); }
     else         { PORTL &= ~(1<<PL2); PORTL |= (1<<PL3); }
+
+    if (rm >= 0) { PORTL |= (1<<PL4); PORTL &= ~(1<<PL5); }
+    else         { PORTL &= ~(1<<PL4); PORTL |= (1<<PL5); }
 }
 
 void serialOutput(int8_t val) {
@@ -177,11 +231,11 @@ void serialOutput(int8_t val) {
 void batteryManagement(void) {
 
 	DDRA = 0xFF;
-	uint16_t batteryInput = adc_read(2);
-
-	char serial_battery[50] = {};
+	uint16_t batteryInput = adc_read(3);
+	//debugging print to serial
+	/*char serial_battery[50] = {};
 	sprintf(serial_battery, "Battery Level: %u\n", batteryInput);
-	serial0_print_string(serial_battery);
+	serial0_print_string(serial_battery); */
 	_delay_ms(100);
 
 	if (batteryInput < 700){
@@ -191,3 +245,65 @@ void batteryManagement(void) {
 	}
 }
 
+void servoControl(int16_t *servo1c_ptr){
+	int16_t servo1c = *servo1c_ptr;
+
+	OCR3A = (int32_t)servo1c;
+}
+
+void beaconFreq(void){
+	// adc reading of photoresistor input
+	// values to
+	uint16_t photoResLeft = adc_read(1);
+	uint16_t photoResRight = adc_read(0);
+
+	volatile uint16_t signalMicros;
+	volatile bool newReading; 	// necessary??
+
+	char freq_string[50] = {0};
+	uint16_t frequency = 0;
+
+	//debugging print to serial
+	/*char serial_photoRes[50] = {};
+	sprintf(serial_photoRes, "Light Level Left: %u, Light Level Right: %u\n", photoResLeft, photoResRight);
+	serial0_print_string(serial_photoRes);*/
+
+	if(newReading)
+	{
+		if (signalMicros == NO_BEACON_SIGNAL_CODE)
+		{
+			serial0_print_string("No Beacon Detected\n");
+		}
+		else if (signalMicros == MAX_BEACON_PERIOD_REACHED_CODE)
+		{
+			serial0_print_string("Beacon Frequency Too Low\n");
+		}
+		else
+		{
+			frequency = 1 / signalMicros;
+			sprintf(freq_string, "%u Hz\n", frequency);
+			serial0_print_string(freq_string);
+		}
+	}
+	newReading = false;
+
+
+}
+// PLACE IN beaconFreq function???
+ISR(TIMER4_OVF_vect)
+{
+	if(!newReading)
+	{
+		signalMicros += 4000; // increment signal period value by 4ms
+		if(signalMicros > 20000): // if signal period is larger than 20ms (freq smaller than 50Hz)
+		{
+			newReading = true;
+			signalMicros = ; 	// maximum signal reached code
+		}
+	}
+}
+
+ISR(INT0_vect)
+{
+
+}

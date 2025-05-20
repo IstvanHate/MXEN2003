@@ -26,7 +26,7 @@ typedef struct {
 
 // Function prototypes
 void printLCD(int sensor);
-Inputs readSticks(int pin1, int pin2);
+Inputs readSticks(int pin1, int pin2);   // add more pins for servo?
 
 // Constants
 #define BUILD_DATE __TIME__ " " __DATE__"\n"

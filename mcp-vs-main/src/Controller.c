@@ -1,7 +1,7 @@
 /****************************************************************************
-	Project Students: 	 Jack Searle (21502396), Megan Attwill (idk)
+	Project Students: 	 Jack Searle (21502396), Megan Attwill (21472499)
 	Description: Controller side code, Runs on Arduino ATMEGA 2560.
-				 Takes thumbstick inputs to control 2 x servos and 2 x motors
+				 Takes thumbstick inputs to control 1 x servo and 2 x motors
 				 Transmitts through XBEE to robot using USART protocol
 ****************************************************************************/
 
@@ -72,22 +72,26 @@ int main(void)
 	return(1);
 } //end main
 
-Inputs readSticks(int pin1, int pin2) //function to read the thumbsticks
+Inputs readSticks(int pin1, int pin2) //function to read the thumbsticks - **EXTEND FOR OTHER THUMBSTICK - SERVO**
 {
 	//local variables
 	uint16_t x_reading;	//for raw 10 bit ADC value
 	uint16_t y_reading; //for raw 10 bit ADC value
+	uint16_t y2_reading; //for raw 10 bit ADC value
 	//compensated 8bit values to send
 	uint8_t x_comp;
 	uint8_t y_comp;
+	uint8_t servo_comp;
 	//struct to return
 	Inputs CI; //Controller Inputs
 
 	//read the thumbstick values
 	x_reading = adc_read(pin1)>>2; // read the x axis of the thumbstick and divide by 4
 	y_reading = adc_read(pin2)>>2; // read the y axis of the thumbstick and divide by 4
+	// read y-axis of second thumbstick and divide by 4
 
 	//compoensate for dead zone and special values
+	//for manual motor control on robot
 	if(x_reading < 5) x_comp = 0;			//if less than 5 set to 0
 	else if (x_reading > 250) x_comp = 253;	//if greater than 250 set to 253
 	else x_comp = x_reading;				//otherwise unchanged
@@ -98,6 +102,8 @@ Inputs readSticks(int pin1, int pin2) //function to read the thumbsticks
 
 	sprintf(serial_string, "x: %d, y: %d \n", x_comp, y_comp); //print to serial for debugging
 	serial0_print_string(serial_string); // print the received bytes to the USB serial to make sure the right messages are received
+
+	//for manual servo control on robot - similar to above
 
 	//set the struct values
 	CI.comp_x = x_comp; //set the x value

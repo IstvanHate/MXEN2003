@@ -334,11 +334,10 @@ void serial2_get_data(uint8_t *data, uint8_t size)
 	serial2DataReady = false; //new data no longer available
 } //end serial2_get_data
 
-/*didn't realise there was an in-built function, got my own in my code
-ISR(USART2_RX_vect)  // ISR executed whenever a new byte is available in the serial buffer
+/*ISR(USART2_RX_vect)  // ISR executed whenever a new byte is available in the serial buffer
 {
 	static uint8_t recvByte1=0, recvByte2=0, recvByte3=0, recvByte4=0, recvByte5=0, recvByte6=0;		// data bytes received
-	static uint8_t serial_fsm_state=0;	S								// used in the serial receive ISR
+	static uint8_t serial_fsm_state=0;								// used in the serial receive ISR
 	static uint8_t numBytes = 6;
 	uint8_t	serial_byte_in = UDR2; //move serial byte into variable
 	if(serial_byte_in == 0xFE) //check for end delimiter
