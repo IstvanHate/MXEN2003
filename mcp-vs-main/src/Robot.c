@@ -21,13 +21,9 @@
 // beacon freq codes + values
 #define TIMER_TOP_VALUE 15625
 #define TIMER_PERIOD 5
-#define LIGHT_THRESHOLD 200
-volatile uint16_t flashCountR = 0;
-volatile uint16_t flashCountL = 0;
-volatile uint16_t frequencyAVG = 0;
-volatile uint16_t frequencyR = 0;
-volatile uint16_t frequencyL = 0;
-volatile uint16_t freqDiff = 0;
+#define LIGHT_THRESHOLD 100
+volatile uint16_t flashCountR = 0, flashCountL = 0;
+volatile uint16_t frequencyR = 0, frequencyL = 0, freqFinal = 0;
 volatile uint8_t timerCount = 0;
 char freq_string[50] = {0};
 char freq_string2[50] = {0};
@@ -43,7 +39,6 @@ volatile bool AUTONOMOUS = false; //autonomous mode turned on or off
 
 //not sending anything to controller LCD atm
 uint8_t sendDataByte1=0, sendDataByte2=0; //Photoresistor light level + frequency
-uint32_t current_ms=0, last_send_ms=0;	  // used for timing the serial sending
 //*********************************************************************************************
 
 
@@ -118,13 +113,13 @@ int main(void)
 	while (1) //main loop
 	{
 
-		servoInput = 0;
+		servoInput = 120;
 		fc = 200;
 		rc = 200;
-		current_ms = milliseconds_now();
+		//current_ms = milliseconds_now();
 		batteryManagement();
 		motorDrive(&fc, &rc);
-		//servoDrive(servoInput);
+		servoDrive(servoInput);
 		beaconFreq();
 
 		//beacon frequency detection not in xbee comms loop
@@ -251,7 +246,6 @@ void batteryManagement(void) {
 	/*char serial_battery[50] = {};
 	sprintf(serial_battery, "Battery Level: %u\n", batteryInput);
 	serial0_print_string(serial_battery); */
-	_delay_ms(100);
 
 	if (batteryInput < 700){
 		PORTA |= (1<<PA0);
@@ -263,80 +257,68 @@ void batteryManagement(void) {
 
 void beaconFreq(void){
 	// adc reading of photoresistor input
-	uint16_t lightLeftCurrent = adc_read(1);
-	uint16_t lightLeftPrev = 0;
+	static uint16_t lightLeftPrev = 0, lightRightPrev = 0;
 	uint16_t lightRightCurrent = adc_read(0);
-	uint16_t lightRightPrev = 0;
+	uint16_t lightLeftCurrent = adc_read(1);
 
 	//debugging print to serial
 	/*char serial_photoRes[50] = {};
 	sprintf(serial_photoRes, "Light Level Left: %u, Light Level Right: %u\n", photoResLeft, photoResRight);
 	serial0_print_string(serial_photoRes);*/
-	// LEFT
-	if (lightLeftCurrent > LIGHT_THRESHOLD && lightLeftPrev < LIGHT_THRESHOLD)
-	{
-		flashCountL += 1;
-		lightLeftPrev = lightLeftCurrent;
-		//sprintf(freq_string, "Left Light Level: %u Flash Count: %u\n", lightLeftPrev, flashCountL);
-		//serial0_print_string(freq_string);
-	}
+	//if (current_ms - last_send_ms >= 50)
 
-	// RIGHT
-	if (lightRightCurrent > LIGHT_THRESHOLD && lightRightPrev < LIGHT_THRESHOLD)
-	{
-		flashCountR += 1;
+		// LEFT
+		if (lightLeftCurrent > LIGHT_THRESHOLD && lightLeftPrev < LIGHT_THRESHOLD)
+		{
+
+			flashCountL += 1;
+			//sprintf(freq_string, "Left Light Level: %u Flash Count: %u\n", lightLeftPrev, flashCountL);
+			//serial0_print_string(freq_string);
+		}
+		// RIGHT
+		if (lightRightCurrent > LIGHT_THRESHOLD && lightRightPrev < LIGHT_THRESHOLD)
+		{
+			flashCountR += 1;
+			//sprintf(freq_string2, "Right Light Level: %u Flash Count: %u\n", lightRightPrev, flashCountR);
+			//serial0_print_string(freq_string2);
+		}
+		lightLeftPrev = lightLeftCurrent;
 		lightRightPrev = lightRightCurrent;
-		//sprintf(freq_string2, "Right Light Level: %u Flash Count: %u\n", lightRightPrev, flashCountR);
-		//serial0_print_string(freq_string2);
 	}
-}
 
 ISR(TIMER4_COMPA_vect)
 {
-	serial0_print_string("1 second has passed.\n");
 	timerCount += 1;
-	if (timerCount == 5)
+	if (timerCount == TIMER_PERIOD)
 	{
 		frequencyL = flashCountL / TIMER_PERIOD;
 		frequencyR = flashCountR / TIMER_PERIOD;
-		freqDiff = abs(frequencyL - frequencyR);
-		sprintf(freq_string2, "Total Flash Count L: %u Hz\n Total Flash Count R: %u Hz\n Freq Diff: %u\n", flashCountL, flashCountR, freqDiff);
-		serial0_print_string(freq_string2);
-		if (freqDiff < 2)
+
+		if (frequencyL > frequencyR)
 		{
-			frequencyAVG = (frequencyL + frequencyR) / 2;
-		}
-		else if (frequencyL > frequencyR)
-		{
-			frequencyAVG = frequencyL;
+			freqFinal = frequencyL;
 		}
 		else
 		{
-			frequencyAVG = frequencyR;
+			freqFinal = frequencyR;
 		}
-		sprintf(freq_string, "Frequency Detected: %u Hz \n", frequencyAVG);
-		serial0_print_string(freq_string);
 		flashCountL = 0;
 		flashCountR = 0;
 		timerCount = 0;
 	}
 
-	/*
-	if (frequencyAVG == 0)
+	if (freqFinal == 0)
 	{
 		serial0_print_string("No Beacon Detected.\n");
 	}
-	else if (frequencyAVG > 20)
+	else if (freqFinal > 25)
 	{
 		serial0_print_string("Frequency Too High.\n");
 	}
 	else
 	{
-		sprintf(freq_string, "Frequency Detected: %u Hz\n", frequencyAVG);
+		sprintf(freq_string, "Frequency Detected: %u Hz\n", freqFinal);
 		serial0_print_string(freq_string);
 	}
-		*/
 
 }
-
-
