@@ -7,16 +7,15 @@
 
 //include this .c file's header file
 #include "Controller.h"
-
-//static function prototypes, functions only called in this file
-
+#define START_BYTE 0xFF
+#define STOP_BYTE 0xFE
 
 //file scope variables
 static char serial_string[200] = {0};
 volatile uint8_t dataByte1=0, dataByte2=0, dataByte3=0, dataByte4=0;		// data bytes received
 volatile bool new_message_received_flag=false;
 volatile bool Auto = false;
-
+volatile uint8_t dataBytes[5];
 //debounce variables
 uint32_t last_debounce = 0;
 uint32_t debounce_delay = 50;
@@ -80,7 +79,7 @@ int main(void)
 			lcd_puts(lcd_string);
 			lcd_goto(0x40);
 			sprintf(lcd_string, " 3:%4d , 4:%4d\n", sendDataByte3, sendDataByte4);
-			lcd_puts(lcd_string);	*/
+			lcd_puts(lcd_string); */
 
 
 		}
@@ -90,10 +89,13 @@ int main(void)
 		{
 			// now that a full message has been received, we can process the whole message
 			// the code in this section will implement the result of your message
-			sprintf(serial_string, "received: 1:%4d, 2:%4d , 3:%4d , 4:%4d \n", dataByte1, dataByte2, dataByte3, dataByte4);
+			sprintf(serial_string, "received: 1:%4d, 2:%4d , 3:%4d , 4:%4d , 5:%4d \n", dataBytes[0], dataBytes[1], dataBytes[2], dataBytes[3], dataBytes[4]);
 			serial0_print_string(serial_string);  // print the received bytes to the USB serial to make sure the right messages are received
-			lcd_home();
-			sprintf(lcd_string, "range: %d ", dataByte1);
+			lcd_goto(0);
+			sprintf(lcd_string, "Lit:%3u Freq:%3u", dataBytes[1], dataBytes[0]);
+			lcd_puts(lcd_string);
+			lcd_goto(0x40);
+			sprintf(lcd_string, "L:%2u R:%2u F:%2u", dataBytes[2], dataBytes[3], dataBytes[4]);
 			lcd_puts(lcd_string);
 			new_message_received_flag=false;	// set the flag back to false
 		}
@@ -108,4 +110,41 @@ ISR(INT3_vect){
         Auto = !Auto;
         last_debounce = now;
     }
+}
+
+ISR(USART2_RX_vect)  // ISR executed when a new byte is available in the serial buffer
+
+	//interrupt vector raised when UDR2 has a byte ready to be processed, serial comes from XBEE explorer regulated
+	//Start byte, 5 data bytes (forward & right values, servo 1 & servo 2 pos change [8 bit values], autonomous mode [bool])
+
+{
+	uint8_t serial_byte_in = UDR2;  // Read received byte from USART data reg for USART2 serial port
+	typedef enum { WAIT_START, PARAM1, PARAM2, PARAM3, PARAM4, PARAM5, WAIT_STOP } SerialState; //enumurate nums to what they mean
+	static SerialState serial_fsm_state = WAIT_START; //static variable to keep track of the state machine
+	static uint8_t recvBytes[5];  // Store received input from controller temporarily
+
+	switch (serial_fsm_state)
+	{
+		case WAIT_START: //WAIT_START = 0, initial value of serial_fsm_state
+
+			//if byte isn't start byte, it won't set serial_fsm_state to the first param
+			if (serial_byte_in == START_BYTE)  // Start byte received (255 in dec)
+				serial_fsm_state = PARAM1; //1, first actual byte of data
+			break;
+
+		case PARAM1: case PARAM2: case PARAM3: case PARAM4: case PARAM5:
+			recvBytes[serial_fsm_state - 1] = serial_byte_in; //store byte coming into UDR2 through serial
+			serial_fsm_state++;  // Move to the next parameter
+			break;
+
+		case WAIT_STOP:
+			if (serial_byte_in == STOP_BYTE)  // Stop byte received (254 in dec)
+			{
+				//This little piece of code means if the last byte recieved wasn't the stop byte, it won't update the values for use in main
+				memcpy((void*)dataBytes, (void*)recvBytes, sizeof(recvBytes));  // Copy received data
+				new_message_received_flag = true;  // Set flag for main loop processing
+			}
+			serial_fsm_state = WAIT_START;  // Reset state for next message
+			break;
+	}
 }
