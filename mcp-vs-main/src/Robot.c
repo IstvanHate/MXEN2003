@@ -1,5 +1,5 @@
 /****************************************************************************
-	Project Students: 	 Jack Searle (21502396), Megan Attwill (idk)
+	Project Students: 	 Jack Searle (21502396), Megan Attwill (21472499)
 	Description: Robot side code, runs on Arduino ATMEGA2560.abort
 				 Contains both code to recieve controller single with XBEE
 				 Contains autonomous portion of code too.

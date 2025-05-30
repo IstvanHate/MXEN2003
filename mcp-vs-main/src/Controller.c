@@ -1,5 +1,5 @@
 /****************************************************************************
-	Project Students: 	 Jack Searle (21502396), Megan Attwill (214something)
+	Project Students: 	 Jack Searle (21502396), Megan Attwill (21472499)
 	Description: Controller side code, Runs on Arduino ATMEGA 2560.abort
 				 Takes thumbstick inputs to control 2 x servos and 2 x motors
 				 Transmitts through XBEE to robot using USART protocol
